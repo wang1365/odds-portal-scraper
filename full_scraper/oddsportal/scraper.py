@@ -42,7 +42,9 @@ class Scraper(object):
             self.wait_on_page_load = 3
         self.options = webdriver.ChromeOptions()
         self.options.add_argument('headless')
+
         self.driver = webdriver.Chrome('./chromedriver/chromedriver', chrome_options=self.options)
+
         logger.info('Chrome browser opened in headless mode')
         
         # exception when no driver created
@@ -55,7 +57,8 @@ class Scraper(object):
         self.driver.get(link)
         try:
             # if no Login button -> page not found
-            self.driver.find_element_by_css_selector('.button-dark')
+            # self.driver.find_element_by_css_selector('.button-dark')
+            self.driver.find_element_by_css_selector('.loginModalBtn')
         except NoSuchElementException:
             logger.warning('Problem with link, could not find Login button - %s', link)
             return False
@@ -94,6 +97,7 @@ class Scraper(object):
             table_rows = tournament_table.find('tbody > tr')
             num_table_rows = len(table_rows)
             for i in range(0,num_table_rows):
+                logger.info('==> Start craw: ' + i)
                 try:
                     # Finding the table cell with game time and assessing if its blank tells us if this is a game data row
                     time_cell = tournament_table.find('tbody > tr').eq(i).find('td.table-time')

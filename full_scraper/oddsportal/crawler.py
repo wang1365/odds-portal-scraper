@@ -49,7 +49,8 @@ class Crawler(object):
         self.driver.get(link)
         try:
             # If no Login button, page not found
-            self.driver.find_element_by_css_selector('.button-dark')
+            # self.driver.find_element_by_css_selector('.button-dark')
+            self.driver.find_element_by_css_selector('.loginModalBtn')
         except NoSuchElementException:
             logger.warning('Problem with link, could not find Login button - %s', link)
             return False
@@ -84,12 +85,14 @@ class Crawler(object):
             return seasons
         html_source = self.get_html_source()
         html_querying = pyquery(html_source)
-        season_links = html_querying.find('div.main-menu2.main-menu-gray > ul.main-filter > li > span > strong > a')
+        # season_links = html_querying.find('div.main-menu2.main-menu-gray > ul.main-filter > li > span > strong > a')
+        season_links = html_querying.find('#app > div > div.w-full > div > main > div.relative.w-full.bg-white-main > div.flex.flex-col > div > div.flex.flex-wrap > a')
         logger.info('Extracted links to %d seasons', len(season_links))
         for season_link in season_links:
             this_season = Season(season_link.text)
             # Start the Season's list of URLs with just the root one
-            this_season_url = self.base_url + season_link.attrib['href']
+            # this_season_url = self.base_url + season_link.attrib['href']
+            this_season_url = season_link.attrib['href']
             this_season.urls.append(this_season_url)
             seasons.append(this_season)
         return seasons
@@ -111,23 +114,26 @@ class Crawler(object):
             return
         # Just need to locate the final pagination tag
         pagination_links = html_querying.find('div#pagination > a')
+        page_count = int(pagination_links[-2])
+        season.urls = [f'{first_url_in_season}#/page/{i + 1}' for i in range(page_count)]
+        logger.info("season urls: " + season.urls)
         # It's possible, however, there is no pagination...
-        if len(pagination_links) <= 1:
-            return
-        last_page_number = -1
-        last_page_url = None
-        for link in reversed(pagination_links):
-            span = link.find('span')
-            if span != None and span.text != None and '»|' in span.text:
-                # This is the last link because it has these two characters in it...
-                last_page_number = int(link.attrib['x-page'])
-                last_page_url = first_url_in_season + link.attrib['href']
-                break
-        # If the last page number was set, the page format must've changed - RuntimeError
-        if last_page_number == -1:
-            logger.error('Could not locate final page URL from %s', first_url_in_season)
-            raise RuntimeError('Could not locate final page URL from %s', first_url_in_season)
-        for i in range(2,last_page_number):
-            this_url = last_page_url.replace('page/' + str(last_page_number), 'page/' + str(i))
-            season.urls.append(this_url)
-        season.urls.append(last_page_url)
+        # if len(pagination_links) <= 1:
+        #     return
+        # last_page_number = -1
+        # last_page_url = None
+        # for link in reversed(pagination_links):
+        #     span = link.find('span')
+        #     if span != None and span.text != None and '»|' in span.text:
+        #         # This is the last link because it has these two characters in it...
+        #         last_page_number = int(link.attrib['x-page'])
+        #         last_page_url = first_url_in_season + link.attrib['href']
+        #         break
+        # # If the last page number was set, the page format must've changed - RuntimeError
+        # if last_page_number == -1:
+        #     logger.error('Could not locate final page URL from %s', first_url_in_season)
+        #     raise RuntimeError('Could not locate final page URL from %s', first_url_in_season)
+        # for i in range(2,last_page_number):
+        #     this_url = last_page_url.replace('page/' + str(last_page_number), 'page/' + str(i))
+        #     season.urls.append(this_url)
+        # season.urls.append(last_page_url)
