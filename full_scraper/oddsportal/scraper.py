@@ -4,7 +4,8 @@ scraper.py
 Logic for the overall Odds Portal scraping utility focused on scraping
 
 """
-
+import json
+import pickle
 
 from .models import Game
 from .models import Season
@@ -15,23 +16,45 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
+import requests
 
 import datetime
 import logging
 import os
 import re
 import time
-
+import hashlib
+import pathlib
 
 logger = logging.getLogger(__name__)
 
+class Cache(object):
+
+    def __init__(self):
+        self.base = pathlib.Path('/data/odds')
+        if not self.base.exists():
+            self.base.mkdir(parents=True, exist_ok=True)
+
+    def get(self, url):
+        key = hashlib.md5(url.encode()).hexdigest()
+        f = self.base.joinpath(key)
+        if not f.exists():
+            return []
+        # return f.read_text(encoding='utf8')
+        b = f.read_bytes()
+        return pickle.loads(b)
+    def set(self, url, obj):
+        key = hashlib.md5(url.encode()).hexdigest()
+        f = self.base.joinpath(key)
+        b = pickle.dumps(obj)
+        f.write_bytes(b)
 
 class Scraper(object):
     """
     A class to scrape/parse match results from oddsportal.com website.
     Makes use of Selenium and BeautifulSoup modules.
     """
-    
+
     def __init__(self, wait_on_page_load=3):
         """
         Constructor
@@ -44,12 +67,13 @@ class Scraper(object):
         self.options.add_argument('headless')
 
         self.driver = webdriver.Chrome('./chromedriver/chromedriver', chrome_options=self.options)
+        self.cache = Cache()
 
         logger.info('Chrome browser opened in headless mode')
-        
+
         # exception when no driver created
-        
-    def go_to_link(self,link):
+
+    def go_to_link(self, link):
         """
         returns True if no error
         False whe page not found
@@ -65,10 +89,10 @@ class Scraper(object):
         # Workaround for ajax page loading issue
         time.sleep(self.wait_on_page_load)
         return True
-        
+
     def get_html_source(self):
         return self.driver.page_source
-    
+
     def close_browser(self):
         time.sleep(5)
         try:
@@ -83,6 +107,11 @@ class Scraper(object):
             season (Season) with urls but not games populated, to modify
         """
         for url in season.urls:
+            cached_games = self.cache.get(url)
+            if cached_games:
+                season.games = cached_games
+                continue
+
             self.go_to_link(url)
             html_source = self.get_html_source()
             html_querying = pyquery(html_source)
@@ -93,103 +122,88 @@ class Scraper(object):
                 logger.warning('Found "No data available", skipping %s', url)
                 continue
             retrieval_time_for_reference = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-            tournament_table = html_querying.find('div#tournamentTable > table#tournamentTable')
-            table_rows = tournament_table.find('tbody > tr')
-            num_table_rows = len(table_rows)
-            for i in range(0,num_table_rows):
-                logger.info('==> Start craw: ' + i)
-                try:
-                    # Finding the table cell with game time and assessing if its blank tells us if this is a game data row
-                    time_cell = tournament_table.find('tbody > tr').eq(i).find('td.table-time')
-                    if 0 == len(str(time_cell).strip()):
-                        # This row of the table does not contain game/match data
-                        continue
+
+            scripts = html_querying.find('script')
+            url_param_txt = [s.text for s in scripts if s.text and 'pageOut' in s.text][0]
+            url_param_txt = url_param_txt.split("'")[1]
+            url_param = json.loads(url_param_txt)
+            url_pattern = f'https://www.oddsportal.com/ajax-sport-country-tournament-archive_/{url_param["sid"]}/{url_param["id"]}/X0/1/0/page/%s'
+            headers = {
+                'authority': 'www.oddsportal.com',
+                'accept': 'application/json, text/plain, */*',
+                'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'content-type': 'application/json',
+                'referer': 'https://www.oddsportal.com/basketball/usa/nba/results/',
+                'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': "Windows",
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-origin',
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'x-requested-with': 'XMLHttpRequest',
+            }
+            session = requests.Session()
+
+            page_url = url_pattern % url.split('/')[-1]
+            ret = session.get(page_url, headers=headers)
+
+            logger.info("==> Ajax [%s] request result: %s", page_url, ret.text)
+            if ret.status_code != 200:
+                print('Ajax request failed: %s' + url)
+                logger.warning('Ajax request failed: %s', url)
+                continue
+            if 'globals.jsonpCallback' in ret.text:
+                logger.warning('Ajax request failed: %s', ret.text)
+                logger.warning('Ajax request failed: %s', page_url)
+                continue
+
+            def parse_game(response):
+                result = json.loads(response.text)
+                items = result['d']['rows']
+                games = []
+                for item in items:
                     game = Game()
-                    # Need to get the actual HtmlElement out of the PyQuery object that time_cell currently is
-                    time_cell = time_cell[0]
-                    for key, value in time_cell.attrib.items():
-                        if key == 'class':
-                            time_cell_classes = value.split(' ')
-                            for time_cell_class in time_cell_classes:
-                                if 0 == len(time_cell_class) or time_cell_class[0] != 't':
-                                    continue
-                                if time_cell_class[1] == '0' or time_cell_class[1] == '1' or time_cell_class[2] == '2':
-                                    unix_time = int(time_cell_class.split('-')[0].replace('t',''))
-                                    game.game_datetime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(unix_time))
-                                    break
-                            break
-                    # If time still isn't set at this point, then assume corrupt data and skip the row
-                    if 0 == len(game.game_datetime):
-                        continue
-                    # Set some of the other Game fields that are easy to fill in
+                    games.append(game)
+
+                    game.game_datetime = time.strftime("%Y-%m-%d %H:%M:%S",
+                                                       time.localtime(item['date-start-timestamp']))
                     game.retrieval_datetime = retrieval_time_for_reference
                     game.retrieval_url = url
                     game.num_possible_outcomes = season.possible_outcomes
-                    number_of_outcomes = season.possible_outcomes
-                    # Now get the table cell - the link within it, actually - with participants
-                    participants_link = tournament_table.find('tbody > tr').eq(i).find('td.table-participant > a')
-                    participants = participants_link.text().split(' - ')
-                    game.team_home = participants[0]
-                    game.team_away = participants[1]
-                    game.game_url = self.base_url + participants_link[0].attrib['href']
-                    # Now get the table cell with overall score
-                    overall_score_cell = tournament_table.find('tbody > tr').eq(i).find('td.table-score')
-                    overall_score_string = overall_score_cell.text()
-                    # Perform crude sanitization against various things appended to scores, like " OT"
-                    overall_score_string = overall_score_string.split()[0]
-                    # Home team/participant is always listed first in Odds Portal's scores
-                    if ':' in overall_score_string:
-                        game.score_home = int(overall_score_string.split(':')[0])
-                        game.score_away = int(overall_score_string.split(':')[1])
-                    elif '-' in overall_score_string:
-                        game.score_home = int(overall_score_string.split('-')[0])
-                        game.score_away = int(overall_score_string.split('-')[1])
-                    else:
-                        logger.warning('Could not split score string - delimiter unknown')
-                        raise RuntimeError('Could not split score string - delimiter unknown')
-                    # Based on the score we can infer the outcome, as follows...
-                    if game.score_home > game.score_away:
+                    game.team_home = item['home-name']
+                    game.team_away = item['away-name']
+                    game.game_url = self.base_url + item['url']
+
+                    sh, sa = item['homeResult'], item['awayResult']
+                    game.score_home = int(sh) if sh else None
+                    game.score_away = int(sa) if sa else None
+
+                    if item['home-winner'] == 'win':
                         game.outcome = 'HOME'
-                    elif game.score_home < game.score_away:
+                    elif item['home-winner'] == 'lost':
                         game.outcome = 'AWAY'
                     else:
                         game.outcome = 'DRAW'
-                    # Finally, get the cells with odds - either 2 or 3 depending on number of possible outcomes
-                    individual_odds_links = tournament_table.find('tbody > tr').eq(i).find('td.odds-nowrp > a')
-                    if len(individual_odds_links) < 2:
-                        # Assume data corruption and skip to next row of tournament table
-                        continue
-                    elif number_of_outcomes != 2 and number_of_outcomes != 3:
-                        raise RuntimeError('Unsupported number of outcomes specified - ' + str(number_of_outcomes))
-                    for x, individual_odds_link in enumerate(individual_odds_links):
-                        if 2 == number_of_outcomes:
-                            if x == 0:
-                                # home team odds
-                                game.odds_home = individual_odds_link.text
-                            else:
-                                # away team odds - x must be 1
-                                game.odds_away = individual_odds_link.text
-                        elif 3 == number_of_outcomes:
-                            if x == 0:
-                                # home team odds
-                                game.odds_home = individual_odds_link.text
-                            elif x == 1:
-                                # draw/tie odds
-                                game.odds_draw = individual_odds_link.text
-                            else:
-                                # away team odds - x must be 2
-                                game.odds_away = individual_odds_link.text
-                    # And then, at this point, let's mark draw odds as None/null if only 2 outcomes
-                    if number_of_outcomes == 2:
-                        game.odds_draw = None
-                    season.add_game(game)
-                except Exception as e:
-                    logger.warning('Skipping row, encountered exception - data format not as expected')
-                    continue
+                    odds = item['odds']
+                    if odds:
+                        game.odds_home = odds[0]['avgOdds']
+                        game.odds_away = odds[1]['avgOdds']
+                        game.odds_draw = None if len(odds) < 3 else odds[2]['avgOdds']
+
+                return games
+
+            try:
+                games = parse_game(ret)
+                if games:
+                    self.cache.set(url, games)
+                    for game in games:
+                        season.add_game(game)
+            except Exception as e:
+                logger.error('!!! Parse game failed', e)
 
 
 if __name__ == '__main__':
     s = Scraper()
     s.go_to_link('https://www.oddsportal.com/basketball/usa/nba/results/#/page/27/')
     s.close_browser()
-        

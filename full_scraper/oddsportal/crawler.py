@@ -113,27 +113,8 @@ class Crawler(object):
             logger.warning('Found "No data available", skipping %s', first_url_in_season)
             return
         # Just need to locate the final pagination tag
-        pagination_links = html_querying.find('div#pagination > a')
-        page_count = int(pagination_links[-2])
-        season.urls = [f'{first_url_in_season}#/page/{i + 1}' for i in range(page_count)]
-        logger.info("season urls: " + season.urls)
-        # It's possible, however, there is no pagination...
-        # if len(pagination_links) <= 1:
-        #     return
-        # last_page_number = -1
-        # last_page_url = None
-        # for link in reversed(pagination_links):
-        #     span = link.find('span')
-        #     if span != None and span.text != None and '»|' in span.text:
-        #         # This is the last link because it has these two characters in it...
-        #         last_page_number = int(link.attrib['x-page'])
-        #         last_page_url = first_url_in_season + link.attrib['href']
-        #         break
-        # # If the last page number was set, the page format must've changed - RuntimeError
-        # if last_page_number == -1:
-        #     logger.error('Could not locate final page URL from %s', first_url_in_season)
-        #     raise RuntimeError('Could not locate final page URL from %s', first_url_in_season)
-        # for i in range(2,last_page_number):
-        #     this_url = last_page_url.replace('page/' + str(last_page_number), 'page/' + str(i))
-        #     season.urls.append(this_url)
-        # season.urls.append(last_page_url)
+        pagination_links = html_querying.find('a.pagination-link')
+        if pagination_links:
+            page_count = int(pagination_links[-2].attrib['data-number'])
+            season.urls = [f'{first_url_in_season}#/page/{i + 1}' for i in range(page_count)]
+

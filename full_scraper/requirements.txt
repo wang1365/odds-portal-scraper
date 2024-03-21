@@ -5,3 +5,4 @@ pyquery==1.4.0
 selenium==3.141.0
 soupsieve==1.9.2
 urllib3==1.26.5
+requests==2.27.1
