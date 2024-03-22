@@ -37,26 +37,31 @@ class Crawler(object):
         self.options = webdriver.ChromeOptions()
         self.options.add_argument('headless')
         self.driver = webdriver.Chrome('./chromedriver/chromedriver', chrome_options=self.options)
+        self.driver.maximize_window()
         logger.info('Chrome browser opened in headless mode')
         
         # exception when no driver created
 
-    def go_to_link(self,link):
+    def go_to_link(self, link, wait=0, sleep_time=0):
         """
         returns True if no error
         False whe page not found
         """
+        self.driver.implicitly_wait(wait if wait > 0 else self.wait_on_page_load)
         self.driver.get(link)
+        time.sleep(sleep_time)
+        logger.info('Crawler go to link: %s', link)
+        # Workaround for ajax page loading issue
         try:
             # If no Login button, page not found
-            self.driver.find_element_by_css_selector('.button-dark')
+            # self.driver.find_element_by_css_selector('.button-dark')
+            # self.driver.find_element_by_css_selector('.loginModalBtn')
+            self.driver.find_element_by_css_selector('.loginModalBtn')
         except NoSuchElementException:
-            logger.warning('Problem with link, could not find Login button - %s', link)
+            logger.warning('[crawler]Problem with link, crawler could not find Login button - %s', link)
             return False
-        # Workaround for ajax page loading issue
-        time.sleep(self.wait_on_page_load)
         return True
-        
+
     def get_html_source(self):
         return self.driver.page_source
     
@@ -78,18 +83,20 @@ class Crawler(object):
         """
         seasons = []
         logger.info('Getting all seasons for league via %s', main_league_results_url)
-        if not self.go_to_link(main_league_results_url):
+        if not self.go_to_link(main_league_results_url, wait=15, sleep_time=5):
             logger.error('League results URL loaded unsuccessfully %s', main_league_results_url)
             # Going to send back empty list so this is not processed further
             return seasons
         html_source = self.get_html_source()
         html_querying = pyquery(html_source)
-        season_links = html_querying.find('div.main-menu2.main-menu-gray > ul.main-filter > li > span > strong > a')
+        # season_links = html_querying.find('div.main-menu2.main-menu-gray > ul.main-filter > li > span > strong > a')
+        season_links = html_querying.find('#app > div > div.w-full > div > main > div.relative.w-full.bg-white-main > div.flex.flex-col > div > div.flex.flex-wrap > a')
         logger.info('Extracted links to %d seasons', len(season_links))
         for season_link in season_links:
             this_season = Season(season_link.text)
             # Start the Season's list of URLs with just the root one
-            this_season_url = self.base_url + season_link.attrib['href']
+            # this_season_url = self.base_url + season_link.attrib['href']
+            this_season_url = season_link.attrib['href']
             this_season.urls.append(this_season_url)
             seasons.append(this_season)
         return seasons
@@ -100,7 +107,7 @@ class Crawler(object):
             (Season) object with just one entry in its urls field, to be modified
         """
         first_url_in_season = season.urls[0]
-        self.go_to_link(first_url_in_season)
+        self.go_to_link(first_url_in_season, sleep_time=2)
         html_source = self.get_html_source()
         html_querying = pyquery(html_source)
         # Check if the page says "No data available"
@@ -110,24 +117,8 @@ class Crawler(object):
             logger.warning('Found "No data available", skipping %s', first_url_in_season)
             return
         # Just need to locate the final pagination tag
-        pagination_links = html_querying.find('div#pagination > a')
-        # It's possible, however, there is no pagination...
-        if len(pagination_links) <= 1:
-            return
-        last_page_number = -1
-        last_page_url = None
-        for link in reversed(pagination_links):
-            span = link.find('span')
-            if span != None and span.text != None and '»|' in span.text:
-                # This is the last link because it has these two characters in it...
-                last_page_number = int(link.attrib['x-page'])
-                last_page_url = first_url_in_season + link.attrib['href']
-                break
-        # If the last page number was set, the page format must've changed - RuntimeError
-        if last_page_number == -1:
-            logger.error('Could not locate final page URL from %s', first_url_in_season)
-            raise RuntimeError('Could not locate final page URL from %s', first_url_in_season)
-        for i in range(2,last_page_number):
-            this_url = last_page_url.replace('page/' + str(last_page_number), 'page/' + str(i))
-            season.urls.append(this_url)
-        season.urls.append(last_page_url)
+        pagination_links = html_querying.find('a.pagination-link')
+        if pagination_links:
+            page_count = int(pagination_links[-2].attrib['data-number'])
+            season.urls = [f'{first_url_in_season}#/page/{i + 1}' for i in range(page_count)]
+
