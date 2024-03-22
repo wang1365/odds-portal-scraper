@@ -5,49 +5,21 @@ Logic for the overall Odds Portal scraping utility focused on scraping
 
 """
 import json
+import logging
+import pathlib
 import pickle
+import time
 
-from .models import Game
-from .models import Season
+import requests
 from pyquery import PyQuery as pyquery
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException
 from selenium.common.exceptions import WebDriverException
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.by import By
-import requests
 
-import datetime
-import logging
-import os
-import re
-import time
-import hashlib
-import pathlib
+from oddsportal.cache import Cache
+from .models import Game
 
 logger = logging.getLogger(__name__)
-
-class Cache(object):
-
-    def __init__(self):
-        self.base = pathlib.Path('/data/odds')
-        if not self.base.exists():
-            self.base.mkdir(parents=True, exist_ok=True)
-
-    def get(self, url):
-        key = hashlib.md5(url.encode()).hexdigest()
-        f = self.base.joinpath(key)
-        if not f.exists():
-            return []
-        # return f.read_text(encoding='utf8')
-        b = f.read_bytes()
-        return pickle.loads(b)
-    def set(self, url, obj):
-        key = hashlib.md5(url.encode()).hexdigest()
-        f = self.base.joinpath(key)
-        b = pickle.dumps(obj)
-        f.write_bytes(b)
 
 class Scraper(object):
     """
@@ -73,21 +45,26 @@ class Scraper(object):
 
         # exception when no driver created
 
-    def go_to_link(self, link):
+    def go_to_link(self, link, sleep_time=0):
         """
         returns True if no error
         False whe page not found
         """
+        time.sleep(sleep_time)
+
+        self.driver.implicitly_wait(3)
         self.driver.get(link)
+        logger.info('Go to link: %s', link)
         try:
             # if no Login button -> page not found
             # self.driver.find_element_by_css_selector('.button-dark')
             self.driver.find_element_by_css_selector('.loginModalBtn')
+            # self.driver.find_element_by_partial_link_text('MY LEAGUES')
         except NoSuchElementException:
-            logger.warning('Problem with link, could not find Login button - %s', link)
+            logger.warning('Problem with link, scraper could not find Login button - %s', link)
             return False
         # Workaround for ajax page loading issue
-        time.sleep(self.wait_on_page_load)
+        # time.sleep(self.wait_on_page_load)
         return True
 
     def get_html_source(self):
@@ -112,7 +89,7 @@ class Scraper(object):
                 season.games = cached_games
                 continue
 
-            self.go_to_link(url)
+            self.go_to_link(url, sleep_time=2)
             html_source = self.get_html_source()
             html_querying = pyquery(html_source)
             # Check if the page says "No data available"

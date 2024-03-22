@@ -37,27 +37,31 @@ class Crawler(object):
         self.options = webdriver.ChromeOptions()
         self.options.add_argument('headless')
         self.driver = webdriver.Chrome('./chromedriver/chromedriver', chrome_options=self.options)
+        self.driver.maximize_window()
         logger.info('Chrome browser opened in headless mode')
         
         # exception when no driver created
 
-    def go_to_link(self,link):
+    def go_to_link(self, link, wait=0, sleep_time=0):
         """
         returns True if no error
         False whe page not found
         """
+        self.driver.implicitly_wait(wait if wait > 0 else self.wait_on_page_load)
         self.driver.get(link)
+        time.sleep(sleep_time)
+        logger.info('Crawler go to link: %s', link)
+        # Workaround for ajax page loading issue
         try:
             # If no Login button, page not found
             # self.driver.find_element_by_css_selector('.button-dark')
+            # self.driver.find_element_by_css_selector('.loginModalBtn')
             self.driver.find_element_by_css_selector('.loginModalBtn')
         except NoSuchElementException:
-            logger.warning('Problem with link, could not find Login button - %s', link)
+            logger.warning('[crawler]Problem with link, crawler could not find Login button - %s', link)
             return False
-        # Workaround for ajax page loading issue
-        time.sleep(self.wait_on_page_load)
         return True
-        
+
     def get_html_source(self):
         return self.driver.page_source
     
@@ -79,7 +83,7 @@ class Crawler(object):
         """
         seasons = []
         logger.info('Getting all seasons for league via %s', main_league_results_url)
-        if not self.go_to_link(main_league_results_url):
+        if not self.go_to_link(main_league_results_url, wait=15, sleep_time=5):
             logger.error('League results URL loaded unsuccessfully %s', main_league_results_url)
             # Going to send back empty list so this is not processed further
             return seasons
@@ -103,7 +107,7 @@ class Crawler(object):
             (Season) object with just one entry in its urls field, to be modified
         """
         first_url_in_season = season.urls[0]
-        self.go_to_link(first_url_in_season)
+        self.go_to_link(first_url_in_season, sleep_time=2)
         html_source = self.get_html_source()
         html_querying = pyquery(html_source)
         # Check if the page says "No data available"

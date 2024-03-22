@@ -43,14 +43,19 @@ def scrape_games_for_season(this_season):
     global wait_on_page_load
     logger.info('Season "%s" - getting all pagination links', this_season.name)
     crawler = Crawler(wait_on_page_load=wait_on_page_load)
+
     logger.info('Season "%s" - started this crawler', this_season.name)
     crawler.fill_in_season_pagination_links(this_season)
+
     crawler.close_browser()
     logger.info('Season "%s" - closed this crawler', this_season.name)
+
     logger.info('Season "%s" - populating all game data via pagination links', this_season.name)
     scraper = Scraper(wait_on_page_load=wait_on_page_load)
+
     logger.info('Season "%s" - started this scraper', this_season.name)
     scraper.populate_games_into_season(this_season)
+
     scraper.close_browser()
     logger.info('Season "%s" - closed this scraper', this_season.name)
     return this_season
@@ -68,8 +73,8 @@ def main():
     args = parser.parse_args()
     max_parallel_cpus = args.number_of_cpus
     if max_parallel_cpus == None:
-        logger.info('Did not receive argument --number-of-cpus so will use maximum available to crawl and scrape')
-        max_parallel_cpus = -1
+        logger.info('Did not receive argument --number-of-cpus so will use 1 to crawl and scrape')
+        max_parallel_cpus = 1
     else:
         logger.info('Received argument --number-of-cpus so will use %s', str(max_parallel_cpus))
     if args.wait_time_on_page_load != None:
