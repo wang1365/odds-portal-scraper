@@ -1,18 +1,20 @@
 import pathlib
 import pickle
 
+from oddsportal import Season
+
 
 class Cache(object):
 
-    def __init__(self):
+    def __init__(self, season: Season):
         self.base = pathlib.Path('/data/odds')
+        self.season = season
         if not self.base.exists():
             self.base.mkdir(parents=True, exist_ok=True)
 
-    @staticmethod
-    def gen_key(url):
+    def gen_key(self, url):
         key = url.replace('https://www.oddsportal.com/', '')
-        return key.replace('/', '.')
+        return f"{key.replace('/', '.')}-{len(self.season.urls)}"
 
     def get(self, url):
         f = self.base.joinpath(self.gen_key(url))

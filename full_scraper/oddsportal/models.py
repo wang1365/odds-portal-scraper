@@ -33,6 +33,7 @@ class Season(object):
         self.games = list()
         self.urls = list()
         self.possible_outcomes = int()
+        self.index = int()
 
     def add_game(self, game):
         self.games.append(game)

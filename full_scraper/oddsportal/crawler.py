@@ -109,12 +109,13 @@ class Crawler(object):
         # season_links = html_querying.find('div.main-menu2.main-menu-gray > ul.main-filter > li > span > strong > a')
         season_links = html_querying.find('#app > div > div.w-full > div > main > div.relative.w-full.bg-white-main > div.flex.flex-col > div > div.flex.flex-wrap > a')
         logger.info('Extracted links to %d seasons', len(season_links))
-        for season_link in season_links:
+        for i, season_link in enumerate(season_links):
             this_season = Season(season_link.text)
             # Start the Season's list of URLs with just the root one
             # this_season_url = self.base_url + season_link.attrib['href']
             this_season_url = season_link.attrib['href']
             this_season.urls.append(this_season_url)
+            this_season.index = i
             seasons.append(this_season)
         return seasons
     

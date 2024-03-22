@@ -45,7 +45,6 @@ class Scraper(object):
             self.options.add_argument('--disable-gpu')
 
             self.driver = webdriver.Chrome('./chromedriver/chromedriver', chrome_options=self.options)
-        self.cache = Cache()
         self.session = requests.Session()
         self.headers = {
             'authority': 'www.oddsportal.com',
@@ -114,15 +113,18 @@ class Scraper(object):
             season (Season) with urls but not games populated, to modify
         """
         logger.info('season [%s] url count: %s', season.name, len(season.urls))
+        cache = Cache(season)
+        use_cache = season.index != 0
 
         for url in season.urls:
-            cached_games = self.cache.get(url)
-            if cached_games:
-                season.games = cached_games
-                logger.info('Load url:[%s] from cache', url)
-                continue
+            if use_cache:
+                cached_games = cache.get(url)
+                if cached_games:
+                    season.games = cached_games
+                    logger.info('Load url:[%s] from cache', url)
+                    continue
 
-            st = random.randint(2, 6)
+            st = random.randint(3, 6)
             self.go_to_link(url, sleep_time=st)
             html_source = self.get_html_source()
             html_querying = pyquery(html_source)
@@ -146,7 +148,7 @@ class Scraper(object):
             page_url = url_pattern % url.split('/')[-1]
             ret = self.request(url_pattern % url.split('/')[-1])
 
-            logger.info("==> Ajax [%s] request success", page_url)
+            logger.info("==> Ajax [%s] request success, sleep %s", page_url, st)
             if ret.status_code != 200:
                 print('Ajax request failed: %s' + url)
                 logger.warning('Ajax request failed: %s', url)
@@ -193,7 +195,7 @@ class Scraper(object):
             try:
                 games = parse_game(ret)
                 if games:
-                    self.cache.set(url, games)
+                    cache.set(url, games)
                     for game in games:
                         season.add_game(game)
             except Exception as e:
