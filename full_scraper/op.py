@@ -30,7 +30,7 @@ logger = logging.getLogger('oddsportal')
 
 data = DataRepository()
 
-wait_on_page_load = 10 # seconds - default wait time for each page to load completely
+wait_on_page_load = 15 # seconds - default wait time for each page to load completely
 
 #######################################################################################################################
 
@@ -39,25 +39,31 @@ def get_target_sports_from_file():
         data = json.load(json_file)
         return data
 
-def scrape_games_for_season(this_season):
+def scrape_games_for_season(this_season, driver=None):
     global wait_on_page_load
-    logger.info('Season "%s" - getting all pagination links', this_season.name)
-    crawler = Crawler(wait_on_page_load=wait_on_page_load)
+    try:
+        logger.info('---------------- %s --------------', this_season.name)
+        logger.info('Season "%s" - getting all pagination links', this_season.name)
+        current_crawler = Crawler(wait_on_page_load=wait_on_page_load, driver=driver)
 
-    logger.info('Season "%s" - started this crawler', this_season.name)
-    crawler.fill_in_season_pagination_links(this_season)
+        logger.info('Season "%s" - started this crawler', this_season.name)
+        current_crawler.fill_in_season_pagination_links(this_season)
 
-    crawler.close_browser()
-    logger.info('Season "%s" - closed this crawler', this_season.name)
+        if not driver:
+            current_crawler.close_browser()
+            logger.info('Season "%s" - closed this crawler', this_season.name)
 
-    logger.info('Season "%s" - populating all game data via pagination links', this_season.name)
-    scraper = Scraper(wait_on_page_load=wait_on_page_load)
+        logger.info('Season "%s" - populating all game data via pagination links', this_season.name)
+        scraper = Scraper(wait_on_page_load=wait_on_page_load, driver=driver)
 
-    logger.info('Season "%s" - started this scraper', this_season.name)
-    scraper.populate_games_into_season(this_season)
+        logger.info('Season "%s" - started this scraper', this_season.name)
+        scraper.populate_games_into_season(this_season)
 
-    scraper.close_browser()
-    logger.info('Season "%s" - closed this scraper', this_season.name)
+        if not driver:
+            scraper.close_browser()
+        logger.info('Season "%s" - closed this scraper\n', this_season.name)
+    except Exception as e:
+        logger.error("Scrapy season [%s] failed", this_season.name, exc_info=True)
     return this_season
 
 def main():
@@ -115,14 +121,15 @@ def main():
         data.start_new_data_collection(target_sport_obj)
         main_league_results_url = target_sport_obj['root_url']
         working_seasons = crawler.get_seasons_for_league(main_league_results_url)
-        crawler.close_browser()
         logger.info('Crawler for season links has been shut down')
         # Make sure possible outcomes field is set, because the parallel processor needs to know
         for i,_ in enumerate(working_seasons):
             working_seasons[i].possible_outcomes = target_sport_obj['outcomes']
         # Use parallel processing to scrape games for each season of this league's history
-        working_seasons_w_games = Parallel(n_jobs=max_parallel_cpus)(delayed(scrape_games_for_season)(this_season) for this_season in working_seasons)
+        working_seasons_w_games = Parallel(n_jobs=max_parallel_cpus)(delayed(scrape_games_for_season)(this_season, crawler.get_driver()) for this_season in working_seasons)
         data[c_name].league.seasons = working_seasons_w_games
+
+    crawler.close_browser()
     if ran_once:
         logger.info('Saving output now')
         data.set_output_directory(OUTPUT_DIRECTORY_PATH)

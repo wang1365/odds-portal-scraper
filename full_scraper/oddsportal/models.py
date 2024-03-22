@@ -28,13 +28,13 @@ class Game(object):
 
 
 class Season(object):
-    def __init__(self,name):
-        self.name = name
+    def __init__(self, name):
+        self.name = name.strip()
         self.games = list()
         self.urls = list()
         self.possible_outcomes = int()
 
-    def add_game(self,game):
+    def add_game(self, game):
         self.games.append(game)
 
     def add_url(self,url):

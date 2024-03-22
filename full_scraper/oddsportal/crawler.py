@@ -26,29 +26,42 @@ class Crawler(object):
     """
     WAIT_TIME = 3  # max waiting time for a page to load
     
-    def __init__(self, wait_on_page_load=3):
+    def __init__(self, driver=None, wait_on_page_load=3):
         """
         Constructor
         """
-        self.base_url = 'https://www.oddsportal.com'
-        self.wait_on_page_load = wait_on_page_load
-        if wait_on_page_load == None:
-            self.wait_on_page_load = 3
-        self.options = webdriver.ChromeOptions()
-        self.options.add_argument('headless')
-        self.driver = webdriver.Chrome('./chromedriver/chromedriver', chrome_options=self.options)
-        self.driver.maximize_window()
-        logger.info('Chrome browser opened in headless mode')
+        if driver:
+            self.driver = driver
+        else:
+            self.base_url = 'https://www.oddsportal.com'
+            self.wait_on_page_load = wait_on_page_load
+            if wait_on_page_load == None:
+                self.wait_on_page_load = 3
+            self.options = webdriver.ChromeOptions()
+            self.options.add_argument('--headless')
+            self.options.add_argument('--no-sandbox')
+            self.options.add_argument('--disable-gpu')
+            self.driver = webdriver.Chrome('./chromedriver/chromedriver', chrome_options=self.options)
+            self.driver.maximize_window()
+            logger.info('Chrome browser opened in headless mode')
         
         # exception when no driver created
+    def get_driver(self):
+        return self.driver
 
-    def go_to_link(self, link, wait=0, sleep_time=0):
+    def go_to_link(self, link, wait=0, sleep_time=0, check_element='login'):
         """
         returns True if no error
         False whe page not found
         """
         self.driver.implicitly_wait(wait if wait > 0 else self.wait_on_page_load)
-        self.driver.get(link)
+        self.driver.set_page_load_timeout(15)
+        self.driver.set_script_timeout(15)
+        try:
+            self.driver.get(link)
+        except:
+            logger.info('driver load url not finished and timeout')
+            self.driver.execute_script("window.stop()")
         time.sleep(sleep_time)
         logger.info('Crawler go to link: %s', link)
         # Workaround for ajax page loading issue
@@ -56,9 +69,13 @@ class Crawler(object):
             # If no Login button, page not found
             # self.driver.find_element_by_css_selector('.button-dark')
             # self.driver.find_element_by_css_selector('.loginModalBtn')
-            self.driver.find_element_by_css_selector('.loginModalBtn')
+            if check_element == 'login':
+                self.driver.find_element_by_css_selector('.loginModalBtn')
+            else:
+                self.driver.find_element_by_css_selector('.pagination-link')
         except NoSuchElementException:
-            logger.warning('[crawler]Problem with link, crawler could not find Login button - %s', link)
+            logger.warning('Problem with link, crawler could not find Login button - %s', link)
+            print('Page source:\n', self.driver.page_source)
             return False
         return True
 
@@ -66,7 +83,7 @@ class Crawler(object):
         return self.driver.page_source
     
     def close_browser(self):
-        time.sleep(5)
+        time.sleep(2)
         try:
             self.driver.quit()
             logger.info('Browser closed')
@@ -84,9 +101,9 @@ class Crawler(object):
         seasons = []
         logger.info('Getting all seasons for league via %s', main_league_results_url)
         if not self.go_to_link(main_league_results_url, wait=15, sleep_time=5):
-            logger.error('League results URL loaded unsuccessfully %s', main_league_results_url)
+            logger.warning('League results URL loaded might failed %s', main_league_results_url)
             # Going to send back empty list so this is not processed further
-            return seasons
+            # return seasons
         html_source = self.get_html_source()
         html_querying = pyquery(html_source)
         # season_links = html_querying.find('div.main-menu2.main-menu-gray > ul.main-filter > li > span > strong > a')
@@ -107,7 +124,7 @@ class Crawler(object):
             (Season) object with just one entry in its urls field, to be modified
         """
         first_url_in_season = season.urls[0]
-        self.go_to_link(first_url_in_season, sleep_time=2)
+        self.go_to_link(first_url_in_season, wait=60, sleep_time=5, check_element='pagination')
         html_source = self.get_html_source()
         html_querying = pyquery(html_source)
         # Check if the page says "No data available"
@@ -121,4 +138,6 @@ class Crawler(object):
         if pagination_links:
             page_count = int(pagination_links[-2].attrib['data-number'])
             season.urls = [f'{first_url_in_season}#/page/{i + 1}' for i in range(page_count)]
+            if page_count == 1:
+                logger.info('Check page source: \n %s', html_source)
 
